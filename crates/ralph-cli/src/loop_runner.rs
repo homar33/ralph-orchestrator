@@ -14,8 +14,8 @@ use ralph_adapters::{
 };
 use ralph_core::diagnostics::{HookDisposition, HookRunTelemetryEntry};
 use ralph_core::{
-    CompletionAction, EventLogger, EventLoop, EventParser, EventRecord, HatRegistry, HookEngine,
-    HookExecutor, HookExecutorContract, HookMutationConfig, HookOnError, HookPayloadBuilderInput,
+    CompletionAction, EventLogger, EventLoop, EventParser, EventRecord, HookEngine, HookExecutor,
+    HookExecutorContract, HookMutationConfig, HookOnError, HookPayloadBuilderInput,
     HookPayloadContextInput, HookPhaseEvent, HookRunRequest, HookRunResult, HookSuspendMode,
     LoopCompletionHandler, LoopContext, LoopHistory, LoopRegistry, MergeQueue, RalphConfig, Record,
     SessionRecorder, SummaryWriter, SuspendStateRecord, SuspendStateStore, TerminationReason,
@@ -2523,14 +2523,16 @@ pub async fn run_loop_impl(
             return Ok(reason);
         }
 
-        if detect_solo_output_completion(
-            event_loop.registry(),
-            &output,
-            &config.event_loop.completion_promise,
-        ) {
+        // Fallback: detect completion promise in output text.
+        // Primary path is JSONL events (check_completion_event above).
+        // This catches backends (e.g. kiro-cli) that output LOOP_COMPLETE
+        // as text without using `ralph emit`.
+        if !agent_wrote_events
+            && EventParser::contains_promise(&output, &config.event_loop.completion_promise)
+        {
             let reason = TerminationReason::CompletionPromise;
             info!(
-                "All done! {} detected in solo output.",
+                "All done! {} detected in output text (no JSONL events written).",
                 config.event_loop.completion_promise
             );
 
@@ -4055,9 +4057,9 @@ fn convert_termination_type(
         | ralph_adapters::TerminationType::ForceKill => Some(TerminationReason::Interrupted),
     }
 }
-
+#[cfg(test)]
 fn detect_solo_output_completion(
-    registry: &HatRegistry,
+    registry: &ralph_core::HatRegistry,
     output: &str,
     completion_promise: &str,
 ) -> bool {
